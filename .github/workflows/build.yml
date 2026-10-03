@@ -1,0 +1,87 @@
+name: Build Daily Cello
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  web-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Engine tests (fingering, MusicXML, exercise generator)
+        run: |
+          npm i --no-save @xmldom/xmldom
+          node tools/test-engine.js
+
+  ipad:
+    needs: web-test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate the Xcode project
+        run: xcodegen generate
+      - name: Build for iPad / iPhone (unsigned - Sideloadly signs it with your Apple ID)
+        run: |
+          xcodebuild -project DailyCello.xcodeproj -target DailyCello -configuration Release -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CONFIGURATION_BUILD_DIR="$PWD/out/device" -quiet build
+          ls -la out/device/DailyCello.app | head -8
+      - name: Build for the iPad simulator
+        run: |
+          xcodebuild -project DailyCello.xcodeproj -target DailyCello -configuration Release -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CONFIGURATION_BUILD_DIR="$PWD/out/sim" -quiet build
+      - name: Self-test on an iPad (simulator)
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)['devices']
+          ids=[x['udid'] for k,v in d.items() if 'iOS' in k for x in v if 'iPad' in x['name']]
+          print(ids[-1] if ids else '')")
+          echo "iPad simulator: $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" out/sim/DailyCello.app
+          mkdir -p dist
+          ( xcrun simctl launch --console-pty "$UDID" com.pacello.dailycello --selftest 2>&1 | tee dist/selftest-ipad.txt ) &
+          for i in $(seq 1 90); do sleep 2; grep -q "SELFTEST DONE" dist/selftest-ipad.txt 2>/dev/null && break; done
+          sleep 3
+          xcrun simctl io "$UDID" screenshot dist/screen-ipad.png || true
+          tail -25 dist/selftest-ipad.txt
+          grep -q "SELFTEST DONE 0 failed" dist/selftest-ipad.txt
+      - name: Pack DailyCello.ipa (for Sideloadly)
+        run: |
+          mkdir -p ipa/Payload dist
+          cp -R out/device/DailyCello.app ipa/Payload/
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" ipa/Payload/DailyCello.app/Info.plist
+          cd ipa && zip -qry ../dist/DailyCello.ipa Payload && cd ..
+          cp docs/iPad-install.txt dist/
+          unzip -l dist/DailyCello.ipa | tail -1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DailyCello-ipad
+          path: dist/
+
+  release:
+    needs: [ipad]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Publish the release (private, like the repository)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=$(cat VERSION)
+          TAG="v$V-b${{ github.run_number }}"
+          git log -1 --pretty=%B > notes.txt
+          gh release create "$TAG" out/DailyCello-ipad/DailyCello.ipa out/DailyCello-ipad/iPad-install.txt out/DailyCello-ipad/screen-ipad.png \
+            --title "Daily Cello $V (build ${{ github.run_number }})" --notes-file notes.txt --latest

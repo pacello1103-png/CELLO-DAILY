@@ -1,0 +1,13 @@
+DAILY CELLO ON THE iPAD WITH SIDELOADLY (free, no Xcode) - same as ARCO
+1. On the Mac: open Sideloadly (download from sideloadly.io if needed).
+2. Plug the iPad in with a cable, unlock it, tap Trust.
+3. Drag DailyCello.ipa into Sideloadly. Choose your iPad, type your Apple ID, press Start.
+4. iPad: Settings > General > VPN & Device Management > your Apple ID > Trust.
+   (Developer Mode is already on from ARCO.)
+5. Open Daily Cello. Works 7 days; Sideloadly can renew it (or do step 3 again).
+   Your progress stays on the iPad when you reinstall the same app.
+
+ADDING A PIECE
+- Send the PDF to Claude, get back a .mxl file, open it on the iPad and choose
+  "Daily Cello" in the Share menu (or tap + Import inside the app).
+- Any MusicXML (.mxl / .musicxml) from MuseScore, IMSLP or a scanning app works too.

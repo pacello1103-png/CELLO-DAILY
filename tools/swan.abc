@@ -1,0 +1,14 @@
+X:1
+T:The Swan (Le Cygne)
+C:Camille Saint-Saëns
+M:6/4
+L:1/8
+Q:1/4=54
+K:G clef=tenor
+z12|!p!(G2 F2 B,2) (E2 D2 G,2)|A,4- A,B, C4 z2|E,4 F,G, A,B,CDEF|B6- B z z2 z2|
+(G2 F2 B,2) (E2 D2 G,2)|^A,4- A,B, ^C6|F,3 ^G,^A,B, ^CDEF^G^A|d6- d z z2 z2|
+(d2 B2 G2) (E2 F2 G2)|D4- DE F4 z2|(c2 A2 =F2) (D2 E2 F2)|C4- CD E4 z2|
+!crescendo(!(E2 A,2 B,2) C4 DE!crescendo)!|!diminuendo(!(F6 E4)!diminuendo)! z2|!crescendo(!(E2 A,2 B,2) ^C4 DE!crescendo)!|!diminuendo(!(=F6 ^F6)!diminuendo)!|
+!p!(G2 F2 B,2) (E2 D2 G,2)|A,4- A,B, C4 z2|E,4 F,G, A,B,CDEF|!crescendo(!B12!crescendo)!|
+(B2 A2 E2) (G2 F2 C2)|!diminuendo(!(E2 D2 G,2) (A,2 B,2 G,2)!diminuendo)!|!marcato!B,6 "_dim."(C2 D2 B,2)|"^rit."E6 "^Lento"(E2 F2 D2)|
+"^a tempo"!pp!G12-|G6- G z z2 z2|!fermata!z12|]

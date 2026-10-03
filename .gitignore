@@ -1,0 +1,6 @@
+DailyCello.xcodeproj/
+out/
+ipa/
+dist/
+node_modules/
+.DS_Store
