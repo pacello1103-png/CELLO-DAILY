@@ -175,7 +175,8 @@ const MX = (() => {
   }
   const ABC_CLEF = { bass: 'bass', tenor: 'tenor', alto: 'alto', treble: 'treble', 'treble-8': 'treble' };
   function toAbc(piece) {
-    const keyAcc = typeof keyAccidentals === 'function' ? keyAccidentals(piece.key.name) : {};
+    let keyAcc = typeof keyAccidentals === 'function' ? keyAccidentals(piece.key.name) : {};
+    let curKeyName = piece.key.name, curTime = piece.time.beats + '/' + piece.time.beatType;
     const L = 1 / 16; // whole-note fraction
     const unit = q => q / 4 / L;   // quarters -> L units
     const head = `X:1\nT:${piece.title}\n${piece.composer ? 'C:' + piece.composer + '\n' : ''}M:${piece.time.beats}/${piece.time.beatType}\nL:1/16\nQ:1/4=${piece.tempo}\nK:${piece.key.name} clef=${ABC_CLEF[piece.clef] || 'bass'}\n`;
@@ -184,6 +185,11 @@ const MX = (() => {
     piece.notes.forEach(n => { (byMeasure[n.measure] = byMeasure[n.measure] || []).push(n); });
     piece.measures.forEach((m, i) => {
       let bar = '';
+      if (m.time && i > 0) { const ts = m.time.beats + '/' + m.time.beatType; if (ts !== curTime) { bar += `[M:${ts}]`; curTime = ts; } }
+      if (m.key && i > 0) {
+        const kn = (m.key.mode === 'minor' ? FIFTHS_MIN : FIFTHS_MAJ)[String(m.key.fifths)] || 'C';
+        if (kn !== curKeyName) { curKeyName = kn; keyAcc = typeof keyAccidentals === 'function' ? keyAccidentals(kn) : {}; bar += `[K:${kn}${m.clef && m.clef !== curClef ? ' clef=' + ABC_CLEF[m.clef] : ''}]`; if (m.clef) curClef = m.clef; }
+      }
       if (m.clef && m.clef !== curClef && i > 0) { bar += `[K:clef=${ABC_CLEF[m.clef]}]`; curClef = m.clef; }
       const state = {};
       const ns = byMeasure[m.n] || [];
@@ -194,7 +200,7 @@ const MX = (() => {
         const group = [n]; while (ns[j + group.length] && ns[j + group.length].chord) group.push(ns[j + group.length]);
         j += group.length;
         let pre = '';
-        if (n.tupletStart && n.tuplet) pre += '(' + n.tuplet.actual;
+        if (n.tupletStart && n.tuplet) pre += '(' + n.tuplet.actual + ':' + n.tuplet.normal + ':' + n.tuplet.actual;
         if (n.dyn && /^(ppp|pp|p|mp|mf|f|ff|fff|sfz|fp)$/.test(n.dyn)) pre += '!' + n.dyn + '!';
         (n.wedges || []).forEach(w => { pre += '!' + w + '!'; });
         if (n.words && n.words.length < 24) pre += '"' + (n.wordsPlace === 'below' ? '_' : '^') + n.words.replace(/"/g, '') + '"';

@@ -47,7 +47,11 @@ function readAbc(abc) {
   if (bodyStart < 0) return { notes, L };
   const s = abc;
   let i = bodyStart, barAcc = {}, t = 0, inGrace = false, inChord = false, chordFirst = false, tuplet = null, bar = 0, clef = (/clef=(\w+)/.exec(abc) || [0, 'bass'])[1], slurOpen = 0;
-  const events = [];
+  const events = [], barlines = {};
+  const kHead = (/^K:(.*)$/m.exec(abc) || [0, 'C'])[1].replace(/clef=\S+/, '').trim() || 'C';
+  const mHead = (/^M:(.*)$/m.exec(abc) || [0, '4/4'])[1].trim();
+  let keyName = kHead, meter = mHead, pendingVolta = null, chordEv = null;
+  const compound = () => { const f = meter.split('/').map(Number); return f[1] === 8 && f[0] % 3 === 0 && f[0] > 3; };
   let pendingDeco = [], pendingFinger = null, decoStart = -1, pendingAnn = [], tieFrom = null;
   while (i < s.length) {
     const c = s[i];
@@ -55,16 +59,54 @@ function readAbc(abc) {
     if (c === '\n') { i++; continue; }
     if (c === '!') { const j = s.indexOf('!', i + 1); if (j < 0) break; const d = s.slice(i + 1, j); if (/^[0-5]$/.test(d)) pendingFinger = +d; pendingDeco.push(d); i = j + 1; continue; }
     if (c === '"') { const j = s.indexOf('"', i + 1); if (j < 0) break; pendingAnn.push(s.slice(i + 1, j)); i = j + 1; continue; }
+    if (c === '[' && /^\[\d/.test(s.slice(i))) { const m = /^\[(\d)/.exec(s.slice(i)); pendingVolta = +m[1]; (barlines[bar] = barlines[bar] || {}).volta = pendingVolta; i += m[0].length; continue; }
     if (c === '[') {
       const m = /^\[([A-Za-z]):([^\]]*)\]/.exec(s.slice(i));
-      if (m) { if (m[1] === 'K') { const k = m[2].replace(/clef=\S+/, '').trim(); if (k) keyAcc = keyAccidentals(k); const c2 = /clef=(\w+)/.exec(m[2]); if (c2) clef = c2[1]; } i += m[0].length; continue; }
+      if (m) {
+        if (m[1] === 'K') { const k = m[2].replace(/clef=\S+/, '').trim(); if (k) { keyAcc = keyAccidentals(k); keyName = k; barAcc = {}; } const c2 = /clef=(\w+)/.exec(m[2]); if (c2) clef = c2[1]; }
+        if (m[1] === 'M') meter = m[2].trim();
+        i += m[0].length; continue;
+      }
+      if (s[i + 1] === '|') { i++; continue; }
       inChord = true; chordFirst = true; i++; continue;
     }
-    if (c === ']') { inChord = false; i++; continue; }
+    if (c === ']') {
+      inChord = false;
+      const m = /^\](\d*)(\/*)(\d*)(-?)/.exec(s.slice(i));
+      if (chordEv && (m[1] || m[2])) {
+        let f = m[1] ? +m[1] : 1; if (m[2]) f = f / (m[3] ? +m[3] : Math.pow(2, m[2].length));
+        const d = chordEv.len * (f - 1); chordEv.len *= f; t += d;
+      }
+      if (chordEv && m[4]) { chordEv.tieStart = true; if (!chordEv.grace) tieFrom = chordEv.midi; }
+      chordEv = null;
+      i += m[0].length; continue;
+    }
     if (c === '{') { inGrace = true; i++; continue; }
     if (c === '}') { inGrace = false; i++; continue; }
-    if (c === '|' || c === ':') { barAcc = {}; if (c === '|' && s[i - 1] !== '|' ) bar++; i++; continue; }
-    if (c === '(') { const m = /^\((\d)/.exec(s.slice(i)); if (m) { tuplet = { n: +m[1], left: +m[1] }; i += 2; } else { slurOpen++; i++; } continue; }
+    if (c === '|' || c === ':') {
+      const m = /^(:*\|+\]?:*|:+)/.exec(s.slice(i)); const tok = m[0];
+      barAcc = {};
+      if (tok.includes('|')) {
+        const b = barlines[bar] = barlines[bar] || {};
+        b.end = tok.replace(/:+$/, '') || '|';
+        if (/^:/.test(tok)) b.repeatEnd = true;
+        bar++;
+        if (/:$/.test(tok)) (barlines[bar] = barlines[bar] || {}).repeatStart = true;
+      } else if (tok.length >= 2) { // '::'
+        (barlines[bar] = barlines[bar] || {}).repeatEnd = true; bar++; (barlines[bar] = barlines[bar] || {}).repeatStart = true;
+      }
+      i += tok.length; continue;
+    }
+    if (c === '(') {
+      const m = /^\((\d+)(?::(\d*))?(?::(\d*))?/.exec(s.slice(i));
+      if (m) {
+        const p = +m[1];
+        const q = m[2] ? +m[2] : ({ 2: 3, 3: 2, 4: 3, 6: 2, 8: 3 }[p] || (compound() ? 3 : 2));
+        const r = m[3] ? +m[3] : p;
+        tuplet = { p, q, left: r, r }; i += m[0].length;
+      } else { slurOpen++; i++; }
+      continue;
+    }
     if (c === ')') { const last = events[events.length - 1]; if (last) last.slurEnd = (last.slurEnd || 0) + 1; i++; continue; }
     if (c === '.') { pendingDeco.push('staccato'); i++; continue; }
     const m = /^(\^\^|__|\^|_|=)?([A-Ga-gzx])([,']*)(\d*)(\/*)(\d*)/.exec(s.slice(i));
@@ -73,8 +115,9 @@ function readAbc(abc) {
       const [all, acc, letter, octs, num, slashes, den] = m;
       let dur = (num ? +num : 1);
       if (slashes) dur = dur / (den ? +den : Math.pow(2, slashes.length));
-      let len = dur * L;
-      if (tuplet && !inGrace) { len = len * (tuplet.n === 3 ? 2 / 3 : tuplet.n === 2 ? 3 / 2 : (tuplet.n - 1) / tuplet.n); if (--tuplet.left <= 0) tuplet = null; }
+      let len = dur * L, tup = null;
+      if (tuplet && !inGrace && (!inChord || chordFirst)) { len = len * tuplet.q / tuplet.p; tup = { p: tuplet.p, q: tuplet.q, i: tuplet.r - tuplet.left, r: tuplet.r }; if (--tuplet.left <= 0) tuplet = null; }
+      else if (tuplet && inChord && chordEv) { len = chordEv.len; }
       if (letter !== 'z' && letter !== 'x') {
         const up = letter.toUpperCase();
         let oct = letter === up ? 4 : 5;
@@ -86,22 +129,26 @@ function readAbc(abc) {
         const midi = (oct + 1) * 12 + STEP[up] + a;
         if (!inChord || chordFirst) {
           const tied = !inGrace && tieFrom === midi;
-          const ev = { midi, start, decoStart, t, len, grace: inGrace, finger: pendingFinger, ann: pendingAnn.slice(), chord: inChord, tied, letter: up, oct, alter: a, decos: pendingDeco.slice(), bar, clef, slurStart: slurOpen, tieStart: s[i + all.length] === '-' };
+          const ev = { midi, start, decoStart, t, len, grace: inGrace, finger: pendingFinger, ann: pendingAnn.slice(), chord: inChord, tied, letter: up, oct, alter: a, decos: pendingDeco.slice(), bar, clef, slurStart: slurOpen, tieStart: s[i + all.length] === '-', key: keyName, meter, tup, explicitAcc: !!acc };
           slurOpen = 0;
           notes.push(ev); events.push(ev);
+          if (inChord) { chordEv = ev; ev.chordNotes = []; }
           if (!inGrace) tieFrom = s[i + all.length] === '-' ? midi : null;
+        } else if (chordEv) {
+          chordEv.chordNotes.push({ midi, letter: up, oct, alter: a, explicitAcc: !!acc });
         }
       }
-      if (letter === 'z' || letter === 'x') { tieFrom = null; if (!inGrace) events.push({ rest: true, t, len, bar, clef, decos: pendingDeco.slice(), ann: pendingAnn.slice(), invisible: letter === 'x' }); }
+      if (letter === 'z' || letter === 'x') { tieFrom = null; if (!inGrace) events.push({ rest: true, t, len, bar, clef, decos: pendingDeco.slice(), ann: pendingAnn.slice(), invisible: letter === 'x', key: keyName, meter, tup, slurStart: 0 }); }
       if (!inGrace && (!inChord || chordFirst)) t += len;
       chordFirst = false;
-      pendingDeco = []; pendingFinger = null; pendingAnn = [];
+      if (!inChord || letter === 'z') { pendingDeco = []; pendingFinger = null; pendingAnn = []; }
+      else { pendingDeco = []; pendingFinger = null; pendingAnn = []; }
       i += all.length;
       continue;
     }
     i++;
   }
-  return { notes, events, L, bodyStart, bars: bar };
+  return { notes, events, L, bodyStart, bars: bar, barlines };
 }
 
 /* ---- the fingering engine ---- */
